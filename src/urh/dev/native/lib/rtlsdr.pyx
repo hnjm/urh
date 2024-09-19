@@ -8,7 +8,7 @@ ctypedef unsigned long long uint64_t
 
 cdef crtlsdr.rtlsdr_dev_t*_c_device
 
-cdef void _c_callback_recv(unsigned char *buffer, uint32_t length, void *ctx):
+cdef void _c_callback_recv(unsigned char *buffer, uint32_t length, void *ctx) noexcept:
     global f
     conn = <object> ctx
     (<object>f)(buffer[0:length])
@@ -332,3 +332,11 @@ cpdef int cancel_async():
     :return: 0 on success
     """
     return crtlsdr.rtlsdr_cancel_async(_c_device)
+
+cpdef int set_bias_tee(int on):
+    """
+    Enable or disable the bias tee on GPIO PIN 0.
+ 
+    return -1 if device is not initialized. 0 otherwise.
+    """
+    return crtlsdr.rtlsdr_set_bias_tee (_c_device, on)

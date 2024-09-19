@@ -6,7 +6,9 @@ from PyQt5.QtTest import QTest
 from tests.QtTestCase import QtTestCase
 from urh import settings
 from urh.dev.BackendHandler import BackendHandler
-from urh.plugins.NetworkSDRInterface.NetworkSDRInterfacePlugin import NetworkSDRInterfacePlugin
+from urh.plugins.NetworkSDRInterface.NetworkSDRInterfacePlugin import (
+    NetworkSDRInterfacePlugin,
+)
 from urh.signalprocessing.IQArray import IQArray
 from urh.signalprocessing.Modulator import Modulator
 from urh.signalprocessing.ProtocolAnalyzer import ProtocolAnalyzer
@@ -28,11 +30,18 @@ class TestProtocolSniffer(QtTestCase):
         modulation_type = "FSK"
         sample_rate = 1e6
         device_name = NetworkSDRInterfacePlugin.NETWORK_SDR_NAME
-        sniffer = ProtocolSniffer(samples_per_symbol=samples_per_symbol, center=center, center_spacing=0.1,
-                                  noise=noise, tolerance=tolerance,
-                                  modulation_type=modulation_type, bits_per_symbol=1,
-                                  device=device_name, backend_handler=BackendHandler(),
-                                  network_raw_mode=True)
+        sniffer = ProtocolSniffer(
+            samples_per_symbol=samples_per_symbol,
+            center=center,
+            center_spacing=0.1,
+            noise=noise,
+            tolerance=tolerance,
+            modulation_type=modulation_type,
+            bits_per_symbol=1,
+            device=device_name,
+            backend_handler=BackendHandler(),
+            network_raw_mode=True,
+        )
 
         port = util.get_free_port()
         sniffer.rcv_device.set_server_port(port)
@@ -56,6 +65,12 @@ class TestProtocolSniffer(QtTestCase):
         for d in data:
             packages.append(modulator.modulate(list(map(int, d)), pause))
 
+        next_msg_timestamp = (
+            time.time()
+        )  # Due to simulated transmission method used in testing,
+        # we won't be quite precise on the first timestamp on which data will be received
+        # But at least we'll validate it is received near this time
+
         # verify modulation was correct
         pa = ProtocolAnalyzer(None)
         signal = Signal("", "", sample_rate=sample_rate)
@@ -75,8 +90,27 @@ class TestProtocolSniffer(QtTestCase):
         time.sleep(1)
 
         # Send enough pauses to end sniffing
-        self.network_sdr_plugin_sender.send_raw_data(IQArray(None, np.float32, 10 * 2 * samples_per_symbol), 1)
+        self.network_sdr_plugin_sender.send_raw_data(
+            IQArray(None, np.float32, 10 * 2 * samples_per_symbol), 1
+        )
         time.sleep(1)
 
         sniffer.stop()
         self.assertEqual(sniffer.plain_bits_str, data)
+        # Validate timestamps:
+        for i in range(len(sniffer.messages)):
+            msg = sniffer.messages[i]
+            if i == 0:
+                # For the first message, we can't have much accuracy due to the simulated mechanism used to deliver data.
+                # Let's just verify the timestamp makes sense with following condition:
+                # (next_msg_timestamp < msg.timestamp  &&  msg.timestamp < next_msg_timestamp + SLEEP_TIME_DURING_PROCESS)
+                self.assertLess(next_msg_timestamp, msg.timestamp)
+                self.assertLess(msg.timestamp, next_msg_timestamp + 2)
+            else:
+                # For each message, verify the timestamp according to the theoretical calculation:
+                # (next_msg_timestamp - 0.0001 < msg.timestamp  &&  msg.timestamp < next_msg_timestamp + 0.0001)
+                self.assertLess(next_msg_timestamp - 0.0001, msg.timestamp)
+                self.assertLess(msg.timestamp, next_msg_timestamp + 0.0001)
+            next_msg_timestamp = (
+                msg.timestamp + len(packages[i]) / modulator.sample_rate
+            )
